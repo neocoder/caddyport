@@ -64,6 +64,7 @@ func usage() {
 Usage:
   caddyport serve <name> [--project P] -- <cmd...>   run a host process on a free port,
                                                       exposed at http://<name>.<project>.localhost
+                                                      (name "@" = apex: http://<project>.localhost)
   caddyport sync [--project P] [-- <compose args>]   register routes for a running docker compose stack
   caddyport up [--project P]                          orchestrate caddyport.json (compose up + serves)
   caddyport down [project] [--project P]              stop compose (if configured) and remove routes
@@ -96,7 +97,7 @@ func cmdServe(args []string) error {
 	if err != nil {
 		return err
 	}
-	host := fmt.Sprintf("%s.%s.localhost", name, project)
+	host := hostFor(name, project)
 	if err := applyRoutes(project, func(m map[string]int) { m[host] = port }); err != nil {
 		return err
 	}
@@ -173,7 +174,7 @@ func cmdUp(args []string) error {
 		if err != nil {
 			return err
 		}
-		host := fmt.Sprintf("%s.%s.localhost", name, project)
+		host := hostFor(name, project)
 		routes[host] = port
 		children = append(children, child{name: name, host: host, cmd: cfg.Serve[name], port: port})
 	}
@@ -539,6 +540,9 @@ func serveEnv(name, project string, port int, host string) []string {
 }
 
 func envName(s string) string {
+	if s == "@" {
+		return "APEX"
+	}
 	var b strings.Builder
 	for _, r := range strings.ToUpper(s) {
 		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
@@ -551,6 +555,14 @@ func envName(s string) string {
 }
 
 // ---------- small utilities ----------
+
+// hostFor maps a service name to its hostname; "@" (DNS apex convention) is the bare project host.
+func hostFor(name, project string) string {
+	if name == "@" {
+		return project + ".localhost"
+	}
+	return name + "." + project + ".localhost"
+}
 
 func freePort() (int, error) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")

@@ -39,6 +39,10 @@ caddyport down        # remove routes (+ docker compose down if configured)
 caddyport get-port    # print one free port
 ```
 
+Use `@` as the name to bind the apex host instead (`http://<project>.localhost`),
+e.g. `caddyport serve @ -- npm run dev` or `"@": "npm run dev"` in `caddyport.json`.
+Its env vars are `APEX_PORT` / `APEX_URL`.
+
 Project name defaults to the current directory's basename (override with `--project`).
 
 ### `caddyport.json` (optional, for `up`)
