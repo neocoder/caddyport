@@ -10,6 +10,8 @@ reused HTTP connections). Caddy routes each hostname straight to the port.
 
 ## Setup (once per machine)
 
+### macOS
+
 1. Install Caddy: `brew install caddy`
 2. Build caddyport: `go build -o ~/.local/bin/caddyport .` (ensure `~/.local/bin` is on `PATH`)
 3. Point Homebrew's Caddy at the master config and start it on `:80`:
@@ -19,6 +21,33 @@ reused HTTP connections). Caddy routes each hostname straight to the port.
    sudo brew services start caddy
    ```
    `.localhost` resolves to `127.0.0.1` on macOS automatically — no `/etc/hosts`.
+
+### Linux / WSL2
+
+1. Install Caddy (<https://caddyserver.com/docs/install>) so `caddy` is on `PATH`.
+2. Build caddyport: `go build -o ~/.local/bin/caddyport .`
+   No Go installed? Build it in Docker instead:
+   ```sh
+   docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -e CGO_ENABLED=0 \
+     -v "$PWD":/src -w /src golang:1.25 go build -buildvcs=false -o caddyport .
+   install -m 755 caddyport ~/.local/bin/caddyport
+   ```
+3. Let Caddy listen on port 80 without root (repeat after upgrading Caddy):
+   ```sh
+   sudo setcap cap_net_bind_service=+ep "$(readlink -f "$(command -v caddy)")"
+   ```
+
+There is no service to set up: on Linux caddyport starts the master Caddy itself
+whenever it is not running (log: `~/master_caddy/caddy.log`), and Caddy keeps
+running after you stop your dev servers. Stop it with `caddy stop`.
+
+**WSL2 with a browser on Windows:** nothing extra is needed. Windows forwards
+`localhost` ports into WSL and browsers resolve `*.localhost` on their own, so
+`http://<name>.<project>.localhost` opens from Windows as long as nothing on Windows
+uses port 80. Chrome and Edge reach `*.localhost` over IPv6 (`::1`); Caddy answers
+on both IPv4 and IPv6, so dev servers that only listen on `127.0.0.1` (Vite's
+default) work behind caddyport, even though opening them directly by port from
+Windows fails with a connection reset.
 
 ## Usage
 

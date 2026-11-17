@@ -34,6 +34,16 @@ sudo brew services start caddy
 `.localhost` resolves to `127.0.0.1` automatically on macOS — no `/etc/hosts` edits.
 After the initial start, caddyport reloads Caddy via its admin API (no sudo).
 
+**Linux / WSL2** (no Homebrew, often no systemd): install Caddy from
+<https://caddyserver.com/docs/install>, then allow it to bind port 80 once:
+
+```bash
+sudo setcap cap_net_bind_service=+ep "$(readlink -f "$(command -v caddy)")"
+```
+
+No service is needed there — on Linux caddyport starts the master Caddy on demand
+(log: `~/master_caddy/caddy.log`). On WSL2 the URLs open from a Windows browser as is.
+
 ## Commands
 
 ```
@@ -130,5 +140,6 @@ curl -s -o /dev/null -w 'r1 %{time_total}s\n' "$U" --next -s -o /dev/null -w 'r2
 - If a route 404s / returns empty 200: the host isn't registered — check `caddyport ls`
   and that the process/container is actually up.
 - If reload says "could not reload Caddy": Caddy isn't running — `sudo brew services start caddy`.
+- On Linux, "Caddy is not allowed to listen on port 80": run the `setcap` command it prints, then re-run.
 - Multiple projects coexist: each `<project>` (dir basename) gets its own subdomain and
   free ports, so you can run them all at once.
