@@ -15,10 +15,12 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 )
 
 func main() {
@@ -260,6 +262,9 @@ func cmdDown(args []string) error {
 }
 
 func cmdLs() error {
+	if err := ensureMaster(); err != nil {
+		return err
+	}
 	entries, err := filepath.Glob(filepath.Join(confDir(), "*.caddy"))
 	if err != nil {
 		return err
@@ -297,8 +302,10 @@ func ensureMaster() error {
 		if err := os.WriteFile(caddyfile(), []byte(content), 0o644); err != nil {
 			return err
 		}
-		fmt.Fprintln(os.Stderr, "caddyport: created", caddyfile(),
-			"\n  start the proxy once with: sudo brew services start caddy")
+		fmt.Fprintln(os.Stderr, "caddyport: created", caddyfile())
+		if !startsCaddyOnDemand() {
+			fmt.Fprintln(os.Stderr, "  start the proxy once with:", caddyServiceHint)
+		}
 	}
 	return nil
 }
@@ -381,12 +388,97 @@ func withLock(project string, fn func() error) error {
 	return fn()
 }
 
-func reloadCaddy() {
-	cmd := exec.Command("caddy", "reload", "--config", caddyfile())
-	cmd.Stderr = nil
-	if err := cmd.Run(); err != nil {
-		fmt.Fprintln(os.Stderr, "caddyport: could not reload Caddy — is it running? (sudo brew services start caddy)")
+const (
+	caddyAdminAddr   = "localhost:2019" // Caddy's default admin endpoint
+	caddyServiceHint = "sudo brew services start caddy"
+)
+
+// startsCaddyOnDemand: on Linux there is usually no service keeping the master
+// Caddy alive (WSL has no systemd by default and drops background processes when
+// it shuts down), so caddyport starts it itself whenever it is not running.
+func startsCaddyOnDemand() bool { return runtime.GOOS == "linux" }
+
+func caddyRunning() bool {
+	c, err := net.DialTimeout("tcp", caddyAdminAddr, 500*time.Millisecond)
+	if err != nil {
+		return false
 	}
+	c.Close()
+	return true
+}
+
+func reloadCaddy() {
+	if startsCaddyOnDemand() && !caddyRunning() {
+		if routes, _ := filepath.Glob(filepath.Join(confDir(), "*.caddy")); len(routes) == 0 {
+			return // nothing to serve: don't start a proxy just to unload routes
+		}
+		err := startCaddy()
+		if err == nil {
+			return // a fresh Caddy has already loaded the current routes
+		}
+		if !caddyRunning() { // otherwise a parallel caddyport won the race: reload below
+			fmt.Fprintln(os.Stderr, "caddyport:", err)
+			return
+		}
+	}
+	out, err := exec.Command("caddy", "reload", "--config", caddyfile()).CombinedOutput()
+	if err == nil {
+		return
+	}
+	if startsCaddyOnDemand() && strings.Contains(string(out), "permission denied") {
+		fmt.Fprintln(os.Stderr, "caddyport:", port80Hint())
+		return
+	}
+	if caddyRunning() {
+		fmt.Fprintf(os.Stderr, "caddyport: Caddy rejected the config:\n%s\n", lastLines(string(out), 3))
+		return
+	}
+	fmt.Fprintf(os.Stderr, "caddyport: could not reload Caddy — is it running? (%s)\n", caddyServiceHint)
+}
+
+// startCaddy launches the master Caddy in the background, in its own session so
+// Ctrl+C in the terminal (or closing it) stops the dev servers but not the proxy.
+func startCaddy() error {
+	if _, err := exec.LookPath("caddy"); err != nil {
+		return fmt.Errorf("caddy is not on PATH — install it: https://caddyserver.com/docs/install")
+	}
+	logPath := filepath.Join(masterDir(), "caddy.log")
+	logf, err := os.Create(logPath)
+	if err != nil {
+		return err
+	}
+	defer logf.Close()
+	cmd := exec.Command("caddy", "start", "--config", caddyfile())
+	cmd.Stdout, cmd.Stderr = logf, logf
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Run(); err != nil {
+		if b, _ := os.ReadFile(logPath); strings.Contains(string(b), "permission denied") {
+			return fmt.Errorf("%s", port80Hint())
+		}
+		return fmt.Errorf("could not start Caddy — see %s", logPath)
+	}
+	fmt.Fprintf(os.Stderr, "caddyport: started Caddy (log: %s)\n", logPath)
+	return nil
+}
+
+// port80Hint: binding :80 is privileged on Linux; a file capability on the caddy
+// binary is the one-time fix (no root-owned service needed).
+func port80Hint() string {
+	bin := "$(command -v caddy)"
+	if p, err := exec.LookPath("caddy"); err == nil {
+		if real, err := filepath.EvalSymlinks(p); err == nil {
+			bin = real
+		}
+	}
+	return "Caddy is not allowed to listen on port 80. Allow it once, then re-run:\n  sudo setcap cap_net_bind_service=+ep " + bin
+}
+
+func lastLines(s string, n int) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n")
 }
 
 // ---------- docker ----------
