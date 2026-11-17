@@ -35,7 +35,9 @@ sudo brew services start caddy
 After the initial start, caddyport reloads Caddy via its admin API (no sudo).
 
 **Linux / WSL2** (no Homebrew, often no systemd): install Caddy from
-<https://caddyserver.com/docs/install>, then allow it to bind port 80 once:
+<https://caddyserver.com/docs/install>, disable the packaged service if one started
+(`sudo systemctl disable --now caddy` — on restart it would drop caddyport's routes),
+then allow it to bind port 80 once:
 
 ```bash
 sudo setcap cap_net_bind_service=+ep "$(readlink -f "$(command -v caddy)")"

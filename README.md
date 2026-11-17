@@ -25,6 +25,9 @@ reused HTTP connections). Caddy routes each hostname straight to the port.
 ### Linux / WSL2
 
 1. Install Caddy (<https://caddyserver.com/docs/install>) so `caddy` is on `PATH`.
+   If the package started its own Caddy service (apt/dnf on systemd distros do), disable it:
+   `sudo systemctl disable --now caddy`. Otherwise that service reloads
+   `/etc/caddy/Caddyfile` on every restart and drops all caddyport routes.
 2. Build caddyport: `go build -o ~/.local/bin/caddyport .`
    No Go installed? Build it in Docker instead:
    ```sh
